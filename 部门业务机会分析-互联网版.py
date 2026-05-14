@@ -1,8 +1,6 @@
-""" 销售漏斗智能分析工具 v1.0 (Streamlit 纯净版) """
-import os
-import re
-import datetime
-import streamlit as st
+""" 销售漏斗智能分析工具 v1.0 """
+import os, re, tkinter as tk
+from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -13,13 +11,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
-import matplotlib
-
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
 # ================================================================
-# 常量（原样保留）
+# 常量
 # ================================================================
 STAGE_ORDER = ['销售线索', '公司立项', '客户立项', '技术认可', '商务认可', '签约准备', '已赢单', '已输单']
 STAGE_WEIGHT = {
@@ -41,21 +35,16 @@ INVALID_REASON_MAP = {
 }
 REQUIRED_COLS = ['阶段', '创建日期', '预计签约金额', '业务机会所有人', '销售类型', '更新时间', '业务机会名', '项目类型', '可能性', '预计签约日期', '阶段修改日期']
 ALL_STANDARD_NAMES = [
-    '阶段', '预计签约金额', '业务机会所有人', '业务机会名', '创建日期', '销售类型', '更新时间', '项目类型', '可能性', '行业', '客户名', '销售部门', '产品描述', '预计签约日期',
-    '未签报预计回款金额', '业务机会编号', '结果', '主要市场活动来源', '是否Name客户', '是否有定制开发', '已转签报单', '签约客户联系人', '最终客户', '最终客户联系人', '丢单原因',
-    '竞争对手', '丢单原因备注', '价格手册', '客户编号', '预计供货日期', '是否预计签约当月验收', '阶段修改日期', '项目名称', '项目编号', '签报单流水号', '合同名称', '合同编号', '合计',
-    '所有人编号', '所属公司', '原销售人员', '所有人部门', '创建人', '创建时间', '修改时间', '事业部',
+    '阶段', '预计签约金额', '业务机会所有人', '业务机会名', '创建日期', '销售类型', '更新时间', '项目类型', '可能性', '行业', '客户名', '销售部门', '产品描述', '预计签约日期', '未签报预计回款金额', '业务机会编号', '结果', '主要市场活动来源', '是否Name客户', '是否有定制开发', '已转签报单', '签约客户联系人', '最终客户', '最终客户联系人', '丢单原因', '竞争对手', '丢单原因备注', '价格手册', '客户编号', '预计供货日期', '是否预计签约当月验收', '阶段修改日期', '项目名称', '项目编号', '签报单流水号', '合同名称', '合同编号', '合计', '所有人编号', '所属公司', '原销售人员', '所有人部门', '创建人', '创建时间', '修改时间', '事业部',
 ]
 
-
 # ================================================================
-# 工具函数（原样保留）
+# 工具函数
 # ================================================================
 def safe_col(df, col_name, fallback=''):
     if col_name in df.columns:
         return df[col_name]
     return pd.Series([fallback] * len(df), index=df.index, name=col_name)
-
 
 def format_amount(val):
     try:
@@ -63,7 +52,6 @@ def format_amount(val):
         return f'{v / 10000:.2f}万' if abs(v) >= 10000 else f'{v:,.0f}元'
     except:
         return str(val) if val else '-'
-
 
 def format_date(val):
     try:
@@ -73,14 +61,12 @@ def format_date(val):
     except:
         return '-'
 
-
 def safe_timedelta(dt):
     if pd.isna(dt): return 0
     try:
         return (datetime.now() - pd.to_datetime(dt)).days
     except:
         return 0
-
 
 def clean_col_name(name):
     s = str(name)
@@ -89,9 +75,8 @@ def clean_col_name(name):
     s = re.sub(r'\s+', ' ', s)
     return s
 
-
 # ================================================================
-# 智能Excel读取（原样保留）
+# 智能Excel读取（纯 pandas，杜绝 ZIP closed）
 # ================================================================
 def smart_read_excel(file_path):
     ext = os.path.splitext(file_path)[1].lower()
@@ -123,9 +108,8 @@ def smart_read_excel(file_path):
     except Exception:
         raise ValueError(f'无法读取Excel文件：{file_path}')
 
-
 # ================================================================
-# 列名映射（原样保留）
+# 列名映射
 # ================================================================
 def map_columns_enhanced(df):
     col_map = {}
@@ -156,9 +140,7 @@ def map_columns_enhanced(df):
             alias_str = str(alias) if not isinstance(alias, str) else alias
             for c in cols:
                 if c.lower() == alias_str.lower():
-                    col_map[c] = standard;
-                    matched = True;
-                    break
+                    col_map[c] = standard; matched = True; break
             if matched: break
         if not matched:
             for alias in aliases:
@@ -166,20 +148,16 @@ def map_columns_enhanced(df):
                 if len(alias_str) < 2: continue
                 for c in cols:
                     if alias_str in c or c in alias_str:
-                        col_map[c] = standard;
-                        matched = True;
-                        break
+                        col_map[c] = standard; matched = True; break
                 if matched: break
         if not matched:
             for c in cols:
                 if len(standard) >= 2 and standard in c:
-                    col_map[c] = standard;
-                    break
+                    col_map[c] = standard; break
     return col_map
 
-
 # ================================================================
-# 分析引擎（原样保留）
+# 分析引擎
 # ================================================================
 class FunnelAnalyzer:
     def __init__(self, df):
@@ -232,6 +210,7 @@ class FunnelAnalyzer:
         return self.summary
 
     def _step0_filter_year(self):
+        """第0步：筛选预计签约日期为2026年的项目"""
         col = '预计签约日期'
         total_before = len(self.df)
         if col in self.df.columns:
@@ -244,8 +223,7 @@ class FunnelAnalyzer:
                         dt = pd.to_datetime(val)
                         if dt.year == 2026:
                             year_mask.at[idx] = True
-                    except:
-                        pass
+                    except: pass
             excluded = mask & ~year_mask
             self.excluded_by_year = int(excluded.sum())
             self.df = self.df[year_mask | ~mask].copy().reset_index(drop=True)
@@ -273,19 +251,15 @@ class FunnelAnalyzer:
             stag_age = safe_timedelta(stage_mod_dt)
             if stag_age == 0: stag_age = safe_timedelta(update_dt)
             if stag_age == 0: stag_age = age
-            if stage == '签约准备' and stag_age > 180:
-                reasons.append('stagnant_prep')
-            elif stage == '技术认可' and stag_age > 360:
-                reasons.append('stagnant_tech')
-            elif stage == '商务认可' and stag_age > 360:
-                reasons.append('stagnant_comm')
+            if stage == '签约准备' and stag_age > 180: reasons.append('stagnant_prep')
+            elif stage == '技术认可' and stag_age > 360: reasons.append('stagnant_tech')
+            elif stage == '商务认可' and stag_age > 360: reasons.append('stagnant_comm')
             if amt == 0: reasons.append('zero_amount')
             if stage in ('商务认可', '签约准备'):
                 try:
                     p = float(prob_str.replace('%', '')) if '%' in prob_str else float(prob_str)
                     if stage == '签约准备' and p < 90: reasons.append('zero_prob')
-                except:
-                    pass
+                except: pass
             if safe_timedelta(update_dt) > 180: reasons.append('no_update')
             if '纯借机' in proj_type: reasons.append('pure_borrow')
             if 0 < amt < 5000: reasons.append('tiny_amount')
@@ -335,8 +309,7 @@ class FunnelAnalyzer:
     def _step4(self):
         key = '甄别S5｜有效金额>5000元'
         if key not in self.有效业务机会_filters:
-            self.high_value = pd.DataFrame();
-            return
+            self.high_value = pd.DataFrame(); return
         df = self.有效业务机会_filters[key].copy()
         if df.empty: self.high_value = pd.DataFrame(); return
         ss = safe_col(df, '阶段', '')
@@ -354,8 +327,7 @@ class FunnelAnalyzer:
         if '_is_direct' in df.columns:
             df.loc[df['_is_direct'], '_score_direct'] = 20
         df['_total_score'] = df['_score_stage'] + df['_score_amount'] + df['_score_direct']
-        self.high_value = df.sort_values(['_total_score', '_weighted_amt'], ascending=[False, False]).reset_index(
-            drop=True)
+        self.high_value = df.sort_values( ['_total_score', '_weighted_amt'], ascending=[False, False] ).reset_index(drop=True)
 
     def _step5(self):
         total = len(self.df)
@@ -371,8 +343,7 @@ class FunnelAnalyzer:
         sd = {}
         ss = safe_col(self.df, '阶段', '')
         for s in STAGE_ORDER:
-            m = ss == s;
-            c = int(m.sum())
+            m = ss == s; c = int(m.sum())
             if c > 0:
                 sd[s] = {'count': c, 'amount': float(aa[m].sum())}
         od = {}
@@ -392,17 +363,22 @@ class FunnelAnalyzer:
             'excluded_by_year': self.excluded_by_year,
         }
 
+# ================================================================
+# 图表生成（解决字体方格问题，生成后嵌入文档不单独保存）
+# ================================================================
+def generate_charts(analyzer):
+    import matplotlib
+    # 解决matplotlib中文显示方格问题
+    matplotlib.rcParams['font.family'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'WenQuanYi Micro Hei', 'DejaVu Sans']
+    matplotlib.rcParams['axes.unicode_minus'] = False
+    matplotlib.use('Agg')  # 非交互式后端
+    import matplotlib.pyplot as plt
+    import io
+    import base64
 
-# ================================================================
-# 图表生成（原样保留）
-# ================================================================
-def generate_charts(analyzer, save_dir):
-    plt.rcParams['font.sans-serif'] = [
-        'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Arial Unicode MS', 'Noto Sans CJK SC', 'DejaVu Sans'
-    ]
-    plt.rcParams['axes.unicode_minus'] = False
-    os.makedirs(save_dir, exist_ok=True)
-    cf = []
+    charts = {}
+
+    # 1. 销售漏斗各阶段金额分布
     ss = analyzer.summary.get('stage_distribution', {})
     if ss:
         fig, ax = plt.subplots(figsize=(10, 5))
@@ -410,14 +386,13 @@ def generate_charts(analyzer, save_dir):
         amounts = [ss[s]['amount'] / 10000 for s in stages]
         counts = [ss[s]['count'] for s in stages]
         colors_list = ['#95a5a6', '#bdc3c7', '#3498db', '#2ecc71', '#f39c12', '#e74c3c']
-        bar_colors = []
-        for i in range(len(stages)):
-            idx = min(i, len(colors_list) - 1)
-            bar_colors.append(colors_list[idx])
+        bar_colors = [colors_list[min(i, len(colors_list)-1)] for i in range(len(stages))]
+
         bars = ax.barh(range(len(stages)), amounts, color=bar_colors, edgecolor='white', height=0.6)
         for b, c, a in zip(bars, counts, amounts):
-            ax.text(b.get_width() + max(amounts) * 0.01, b.get_y() + b.get_height() / 2, f'{a:.1f}万({c}单)', va='center',
-                    fontsize=9)
+            ax.text(b.get_width() + max(amounts) * 0.01, b.get_y() + b.get_height() / 2,
+                    f'{a:.1f}万({c}单)', va='center', fontsize=9)
+
         ax.set_yticks(range(len(stages)))
         ax.set_yticklabels(stages, fontsize=10)
         ax.set_xlabel('金额(万元)')
@@ -426,30 +401,39 @@ def generate_charts(analyzer, save_dir):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
-        p = os.path.join(save_dir, 'chart_stage_distribution.png')
-        plt.savefig(p, dpi=150, bbox_inches='tight')
-        plt.close()
-        cf.append(p)
 
+        # 保存到内存
+        buf = io.BytesIO()
+        plt.savefig(buf, dpi=150, bbox_inches='tight', format='png')
+        buf.seek(0)
+        charts['stage_distribution'] = buf
+        plt.close()
+
+    # 2. 无效机会原因分类
     if analyzer.invalid_records:
         fig, ax = plt.subplots(figsize=(9, 6))
         rc = {}
         for r in analyzer.invalid_records:
             rc[r['reason_code']] = rc.get(r['reason_code'], 0) + 1
+
         labels = []
         for k in rc.keys():
             val = str(INVALID_REASON_MAP.get(k, k))
             parts = val.split('：', 1)
             labels.append(parts[0] if parts else val)
-        ax.pie(list(rc.values()), labels=labels, autopct='%1.1f%%', explode=[0.05] * len(rc), startangle=90,
-               textprops={'fontsize': 8}, pctdistance=0.85)
+
+        ax.pie(list(rc.values()), labels=labels, autopct='%1.1f%%',
+               explode=[0.05]*len(rc), startangle=90, textprops={'fontsize':8}, pctdistance=0.85)
         ax.set_title(f'无效机会原因分类(共{len(analyzer.invalid_records)}条)', fontsize=13, fontweight='bold')
         plt.tight_layout()
-        p = os.path.join(save_dir, 'chart_invalid_reasons.png')
-        plt.savefig(p, dpi=150, bbox_inches='tight')
-        plt.close()
-        cf.append(p)
 
+        buf = io.BytesIO()
+        plt.savefig(buf, dpi=150, bbox_inches='tight', format='png')
+        buf.seek(0)
+        charts['invalid_reasons'] = buf
+        plt.close()
+
+    # 3. 销售人员有效漏斗对比
     od = analyzer.summary.get('owner_distribution', {})
     if od:
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -459,21 +443,25 @@ def generate_charts(analyzer, save_dir):
         wgt = [o[1]['weighted'] / 10000 for o in so]
         x = range(len(names))
         bw = 0.35
-        ax.bar([i - bw / 2 for i in x], nom, bw, label='名义金额', color='#3498db', alpha=0.8)
-        ax.bar([i + bw / 2 for i in x], wgt, bw, label='加权金额', color='#e74c3c', alpha=0.8)
+
+        ax.bar([i - bw/2 for i in x], nom, bw, label='名义金额', color='#3498db', alpha=0.8)
+        ax.bar([i + bw/2 for i in x], wgt, bw, label='加权金额', color='#e74c3c', alpha=0.8)
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=45, ha='right', fontsize=16)
-        ax.set_ylabel('金额(万元)', fontsize=14)
-        ax.set_title('销售人员有效漏斗对比', fontsize=16, fontweight='bold')
-        ax.legend(fontsize=18)
+        ax.set_xticklabels(names, rotation=45, ha='right', fontsize=10)
+        ax.set_ylabel('金额(万元)', fontsize=12)
+        ax.set_title('销售人员有效漏斗对比', fontsize=14, fontweight='bold')
+        ax.legend(fontsize=10)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
-        p = os.path.join(save_dir, 'chart_owner_comparison.png')
-        plt.savefig(p, dpi=150, bbox_inches='tight')
-        plt.close()
-        cf.append(p)
 
+        buf = io.BytesIO()
+        plt.savefig(buf, dpi=150, bbox_inches='tight', format='png')
+        buf.seek(0)
+        charts['owner_comparison'] = buf
+        plt.close()
+
+    # 4. 高价值机会Top20
     if not analyzer.high_value.empty:
         top = analyzer.high_value.head(20).copy()
         fig, ax = plt.subplots(figsize=(12, 7))
@@ -482,54 +470,62 @@ def generate_charts(analyzer, save_dir):
         wgt = top['_weighted_amt'].values / 10000
         sc = top['_total_score'].values
         y = range(len(names))
+
         ax.barh([i - 0.2 for i in y], nom, 0.4, label='名义金额', color='#3498db', alpha=0.8)
         ax.barh([i + 0.2 for i in y], wgt, 0.4, label='加权金额', color='#27ae60', alpha=0.8)
         for i, s in enumerate(sc):
-            ax.text(max(nom[i], wgt[i]) + max(nom.max(), wgt.max()) * 0.02, i, f'{s:.0f}分', va='center', fontsize=14,
-                    color='#e74c3c', fontweight='bold')
+            ax.text(max(nom[i], wgt[i]) + max(nom.max(), wgt.max()) * 0.02, i,
+                    f'{s:.0f}分', va='center', fontsize=10, color='#e74c3c', fontweight='bold')
+
         ax.set_yticks(y)
-        ax.set_yticklabels(names, fontsize=14)
-        ax.set_xlabel('金额(万元)', fontsize=14)
-        ax.set_title('高价值机会Top20(含综合评分)', fontsize=16, fontweight='bold')
+        ax.set_yticklabels(names, fontsize=10)
+        ax.set_xlabel('金额(万元)', fontsize=12)
+        ax.set_title('高价值机会Top20(含综合评分)', fontsize=14, fontweight='bold')
         ax.invert_yaxis()
-        ax.legend(fontsize=18)
+        ax.legend(fontsize=10)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
-        p = os.path.join(save_dir, 'chart_high_value_top20.png')
-        plt.savefig(p, dpi=150, bbox_inches='tight')
-        plt.close()
-        cf.append(p)
 
+        buf = io.BytesIO()
+        plt.savefig(buf, dpi=150, bbox_inches='tight', format='png')
+        buf.seek(0)
+        charts['high_value_top20'] = buf
+        plt.close()
+
+    # 5. 有效业务机会甄别过程漏斗
     fig, ax = plt.subplots(figsize=(10, 5))
     fn = list(analyzer.有效业务机会_filters.keys())
     fc_vals = [len(d) for d in analyzer.有效业务机会_filters.values()]
+
     ax.fill_between(range(len(fn)), fc_vals, alpha=0.3, color='#3498db')
     ax.plot(range(len(fn)), fc_vals, 'o-', color='#2c3e50', linewidth=2, markersize=8)
     for i, (n, c) in enumerate(zip(fn, fc_vals)):
-        ax.annotate(str(c), (i, c), textcoords="offset points", xytext=(0, 12), ha='center', fontsize=18,
-                    fontweight='bold')
+        ax.annotate(str(c), (i, c), textcoords="offset points",
+                    xytext=(0, 12), ha='center', fontsize=10, fontweight='bold')
+
     ax.set_xticks(range(len(fn)))
-    ax.set_xticklabels([n.split('｜')[-1] if '｜' in n else n for n in fn], rotation=25, ha='right', fontsize=14)
-    ax.set_ylabel('机会数量', fontsize=14)
-    ax.set_title('有效业务机会甄别过程漏斗', fontsize=16, fontweight='bold')
+    ax.set_xticklabels([n.split('｜')[-1] if '｜' in n else n for n in fn],
+                       rotation=25, ha='right', fontsize=10)
+    ax.set_ylabel('机会数量', fontsize=12)
+    ax.set_title('有效业务机会甄别过程漏斗', fontsize=14, fontweight='bold')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     plt.tight_layout()
-    p = os.path.join(save_dir, 'chart_有效业务机会_funnel.png')
-    plt.savefig(p, dpi=150, bbox_inches='tight')
+
+    buf = io.BytesIO()
+    plt.savefig(buf, dpi=150, bbox_inches='tight', format='png')
+    buf.seek(0)
+    charts['有效业务机会_funnel'] = buf
     plt.close()
-    cf.append(p)
 
-    return cf
-
+    return charts
 
 # ================================================================
-# DOCX报告生成（原样保留）
+# DOCX报告生成（补充管理行动建议和附录，自动保存到指定目录）
 # ================================================================
 def set_cell_shading(cell, color):
-    cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}" />'))
-
+    cell._tc.get_or_add_tcPr().append( parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>') )
 
 def set_run_font(run, font_name='宋体', size=None, bold=None, color=None):
     run.font.name = font_name
@@ -540,7 +536,7 @@ def set_run_font(run, font_name='宋体', size=None, bold=None, color=None):
         r.insert(0, rPr)
     rFonts = rPr.find('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
     if rFonts is None:
-        rFonts = parse_xml(f'<w:rFonts {nsdecls("w")} w:eastAsia="{font_name}" />')
+        rFonts = parse_xml(f'<w:rFonts {nsdecls("w")} w:eastAsia="{font_name}"/>')
         rPr.insert(0, rFonts)
     else:
         rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}eastAsia', font_name)
@@ -548,24 +544,26 @@ def set_run_font(run, font_name='宋体', size=None, bold=None, color=None):
     if bold is not None: run.bold = bold
     if color is not None: run.font.color.rgb = color
 
-
 def remove_empty_paragraph_before_picture(doc):
+    """清除文档中紧跟在分页符或标题后面的空段落，彻底解决图表导致的空白页问题"""
     paras_to_remove = []
     for i, para in enumerate(doc.paragraphs):
         is_break_or_heading = False
+        # 检查是否为分页符段落
         for run in para.runs:
             if 'w:br' in run._element.xml and 'type="page"' in run._element.xml:
                 is_break_or_heading = True
                 break
+        # 检查是否为标题 (通过样式判断)
         if not is_break_or_heading and para.style.name.startswith('Heading'):
             is_break_or_heading = True
         if is_break_or_heading and i + 1 < len(doc.paragraphs):
             next_para = doc.paragraphs[i + 1]
+            # 如果下一个段落完全没有文字且没有任何Run，说明是插入图片留下的空壳
             if next_para.text == '' and not next_para.runs:
                 paras_to_remove.append(next_para._element)
     for p_element in paras_to_remove:
         p_element.getparent().remove(p_element)
-
 
 def add_styled_table(doc, headers, data, col_widths=None):
     table = doc.add_table(rows=1 + len(data), cols=len(headers))
@@ -595,72 +593,89 @@ def add_styled_table(doc, headers, data, col_widths=None):
                     row.cells[i].width = Cm(w)
     return table
 
+def generate_report(analyzer, charts, output_dir=r'D:\部门业务机会分析报告'):
+    # 创建保存目录
+    os.makedirs(output_dir, exist_ok=True)
 
-def generate_report(analyzer, chart_files, output_path):
+    # 生成文件名
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_path = os.path.join(output_dir, f'销售漏斗分析报告_{timestamp}.docx')
+
     doc = Document()
     section = doc.sections[0]
-    section.top_margin = Cm(2);
-    section.bottom_margin = Cm(2)
-    section.left_margin = Cm(2);
-    section.right_margin = Cm(2)
+    section.top_margin = Cm(2); section.bottom_margin = Cm(2)
+    section.left_margin = Cm(2); section.right_margin = Cm(2)
 
+    # 修改默认样式的字体为宋体
     style = doc.styles['Normal']
     style.font.name = '宋体'
     style.element.rPr.rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}eastAsia', '宋体')
 
+    # 标题部分
     for _ in range(4): doc.add_paragraph('')
-    t = doc.add_paragraph();
-    t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    t = doc.add_paragraph(); t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = t.add_run('销售漏斗智能分析报告')
     set_run_font(r, font_name='宋体', size=Pt(28), bold=True, color=RGBColor(44, 62, 80))
-    st = doc.add_paragraph();
-    st.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    st = doc.add_paragraph(); st.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = st.add_run('基于有效业务机会模型与漏斗健康度理论')
     set_run_font(r, font_name='宋体', size=Pt(14), color=RGBColor(127, 140, 141))
     doc.add_paragraph('')
-    dp = doc.add_paragraph();
-    dp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    dp = doc.add_paragraph(); dp.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = dp.add_run(f'生成时间：{datetime.now().strftime("%Y年%m月%d日 %H:%M")}')
     set_run_font(r, font_name='宋体', size=Pt(11), color=RGBColor(149, 165, 166))
 
+    # 筛选信息提示
     diag = analyzer.read_diagnosis
     yf = diag.get('year_filter', {})
     if yf and yf.get('excluded', 0) > 0:
         doc.add_paragraph('')
-        wp = doc.add_paragraph();
-        wp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = wp.add_run(f'📅 已筛选2026年签约项目：原始{yf["before"]}条，' f'排除{yf["excluded"]}条非2026年项目，保留{yf["after"]}条')
+        wp = doc.add_paragraph(); wp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = wp.add_run( f'📅 已筛选2026年签约项目：原始{yf["before"]}条，' 
+                       f'排除{yf["excluded"]}条非2026年项目，保留{yf["after"]}条' )
         set_run_font(r, font_name='宋体', size=Pt(9), color=RGBColor(52, 152, 219))
 
+    # 缺失列提示
     if analyzer.missing_cols:
         doc.add_paragraph('')
-        wp2 = doc.add_paragraph();
-        wp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        wp2 = doc.add_paragraph(); wp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         r = wp2.add_run(f'⚠️ 未识别列：{", ".join(analyzer.missing_cols)}')
         set_run_font(r, font_name='宋体', size=Pt(9), color=RGBColor(231, 76, 60))
 
+    # 数据概览
     doc.add_paragraph('')
-    dp2 = doc.add_paragraph();
-    dp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = dp2.add_run(f'📊 当前分析：{diag.get("total_columns", 0)}列，' f'{analyzer.summary["total_count"]}条记录')
+    dp2 = doc.add_paragraph(); dp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = dp2.add_run( f'📊 当前分析：{diag.get("total_columns", 0)}列，' 
+                   f'{analyzer.summary["total_count"]}条记录' )
     set_run_font(r, font_name='宋体', size=Pt(9), color=RGBColor(52, 152, 219))
 
+    # 目录
     doc.add_page_break()
     h1 = doc.add_heading('目 录', level=1)
     for run in h1.runs: set_run_font(run, font_name='宋体')
-    for item in ['一、数据总览与核心指标', '二、漏斗健康度诊断', '三、无效业务机会识别与剔除', '四、有效业务机会甄别与高价值机会清单', '五、人员漏斗透视', '六、管理行动建议']:
+    catalog_items = [
+        '一、数据总览与核心指标',
+        '二、漏斗健康度诊断',
+        '三、无效业务机会识别与剔除',
+        '四、有效业务机会甄别与高价值机会清单',
+        '五、人员漏斗透视',
+        '六、管理行动建议',
+        '附录A：数据字典',
+        '附录B：评分规则说明'
+    ]
+    for item in catalog_items:
         p = doc.add_paragraph()
         r = p.add_run(item)
         set_run_font(r, font_name='宋体', size=Pt(11))
 
+    # 第一章：数据总览与核心指标
     doc.add_page_break()
-    s = analyzer.summary
-
     h1 = doc.add_heading('一、数据总览与核心指标', level=1)
     for run in h1.runs: set_run_font(run, font_name='宋体')
+
     h2 = doc.add_heading('1.1 核心数据指标', level=2)
     for run in h2.runs: set_run_font(run, font_name='宋体')
     exc_yr = analyzer.summary.get('excluded_by_year', 0)
+    s = analyzer.summary
     kpi = [
         ['原始记录数', f'{yf.get("before", 0)}条', 'Excel全部记录'],
         ['非2026年排除', f'{exc_yr}条', '预计签约日期非2026年'],
@@ -690,19 +705,21 @@ def generate_report(analyzer, chart_files, output_path):
                 note = ''
                 if pct > 30 and sn in ('客户立项', '技术认可'): note = '⚠️ 大肚腩'
                 if sn == '签约准备' and pct < 5 and ta > 0: note = '⚠️ 出口过窄'
-                sd_rows.append(
-                    [sn, str(v['count']), format_amount(v['amount']), f'{pct:.1f}%', format_amount(wa), note])
-        add_styled_table(doc, ['阶段', '数量', '金额', '占比', '加权金额', '说明'], sd_rows, [2.5, 2, 3, 2, 3, 4])
+                sd_rows.append([sn, str(v['count']), format_amount(v['amount']),
+                               f'{pct:.1f}%', format_amount(wa), note])
+        add_styled_table(doc, ['阶段', '数量', '金额', '占比', '加权金额', '说明'],
+                        sd_rows, [2.5, 2, 3, 2, 3, 4])
 
-        for cff in chart_files:
-            if 'stage_distribution' in cff:
-                doc.add_picture(cff, width=Inches(6))
-                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                break
+        # 插入阶段分布图表
+        if 'stage_distribution' in charts:
+            doc.add_picture(charts['stage_distribution'], width=Inches(6))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # 第二章：漏斗健康度诊断
     doc.add_page_break()
-
     h1 = doc.add_heading('二、漏斗健康度诊断', level=1)
     for run in h1.runs: set_run_font(run, font_name='宋体')
+
     h2 = doc.add_heading('2.1 漏斗形状诊断', level=2)
     for run in h2.runs: set_run_font(run, font_name='宋体')
     si = []
@@ -722,7 +739,8 @@ def generate_report(analyzer, chart_files, output_path):
             set_run_font(r, font_name='宋体', size=Pt(10))
             if '⚠️' in issue: r.font.color.rgb = RGBColor(231, 76, 60)
     else:
-        doc.add_paragraph('漏斗形状相对健康。')
+        p = doc.add_paragraph('漏斗形状相对健康。')
+        set_run_font(p.runs[0], font_name='宋体', size=Pt(10))
 
     h2 = doc.add_heading('2.2 漏斗流速诊断', level=2)
     for run in h2.runs: set_run_font(run, font_name='宋体')
@@ -737,19 +755,21 @@ def generate_report(analyzer, chart_files, output_path):
             sd2.append([stg, str(cnt), risk, '核实推进状态' if cnt <= 5 else '立即清理'])
         add_styled_table(doc, ['停滞阶段', '数量', '风险', '建议'], sd2, [3, 3, 3, 7])
 
-    for cff in chart_files:
-        if 'invalid_reasons' in cff:
-            doc.add_picture(cff, width=Inches(5.5))
-            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            break
-    doc.add_page_break()
+    # 插入无效原因图表
+    if 'invalid_reasons' in charts:
+        doc.add_picture(charts['invalid_reasons'], width=Inches(5.5))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+    # 第三章：无效业务机会识别与剔除
+    doc.add_page_break()
     h1 = doc.add_heading('三、无效业务机会识别与剔除', level=1)
     for run in h1.runs: set_run_font(run, font_name='宋体')
+
     h2 = doc.add_heading('3.1 无效机会判定标准', level=2)
     for run in h2.runs: set_run_font(run, font_name='宋体')
     p = doc.add_paragraph('以下标准对每条记录逐一判定，命中任一即标记为"无效机会"。')
-    for run in p.runs: set_run_font(run, font_name='宋体')
+    set_run_font(p.runs[0], font_name='宋体')
+
     rd = []
     for i, item in enumerate(INVALID_REASON_MAP.items(), 1):
         val_str = str(item[1]) if not isinstance(item[1], str) else item[1]
@@ -760,173 +780,234 @@ def generate_report(analyzer, chart_files, output_path):
     h2 = doc.add_heading('3.2 无效机会明细', level=2)
     for run in h2.runs: set_run_font(run, font_name='宋体')
     p = doc.add_paragraph(f'共 {len(analyzer.invalid_records)} 条无效记录：')
-    for run in p.runs: set_run_font(run, font_name='宋体')
+    set_run_font(p.runs[0], font_name='宋体')
+
     rg = defaultdict(list)
     for rec in analyzer.invalid_records:
         rg[rec['reason_code']].append(rec)
 
-    for reason_code, records in rg.items():
-        doc.add_heading(f'3.2.{reason_code}', level=3)
-        reason_text = INVALID_REASON_MAP.get(reason_code, reason_code)
-        doc.add_paragraph(f'原因：{reason_text}（共{len(records)}条）')
-        table_data = []
-        for rec in records[:50]:
-            table_data.append([
-                rec['name'], rec['stage'], rec['owner'],
-                format_amount(rec['amount']), format_date(rec['create_date']),
-                format_date(rec['stage_mod_date']), rec['reason_text']
+    for rc, recs in rg.items():
+        doc.add_heading(f'3.2.{list(rg.keys()).index(rc)+1} {INVALID_REASON_MAP.get(rc, rc)}', level=3)
+        rd_rows = []
+        for rec in recs[:50]:  # 最多显示50条
+            rd_rows.append([
+                rec['name'], rec['stage'], rec['owner'], format_amount(rec['amount']),
+                format_date(rec['create_date']), format_date(rec['stage_mod_date'])
             ])
-        if table_data:
-            add_styled_table(doc, ['业务机会名', '阶段', '负责人', '金额', '创建日期', '阶段修改日期', '原因'],
-                             table_data, [4, 2, 2, 2, 2, 2, 4])
+        if rd_rows:
+            add_styled_table(doc, ['业务机会名', '阶段', '负责人', '金额', '创建日期', '阶段修改日期'],
+                            rd_rows, [5, 2, 2, 2, 2, 2])
 
+    # 第四章：有效业务机会甄别与高价值机会清单
     doc.add_page_break()
-
     h1 = doc.add_heading('四、有效业务机会甄别与高价值机会清单', level=1)
     for run in h1.runs: set_run_font(run, font_name='宋体')
 
     h2 = doc.add_heading('4.1 有效机会甄别流程', level=2)
     for run in h2.runs: set_run_font(run, font_name='宋体')
 
-    filter_steps = list(analyzer.有效业务机会_filters.items())
-    filter_data = []
-    for i, (step_name, df) in enumerate(filter_steps):
-        filter_data.append([
-            f'步骤{i + 1}', step_name, len(df),
-            format_amount(df["预计签约金额"].sum()) if "预计签约金额" in df.columns else "-"
-        ])
-    add_styled_table(doc, ['步骤', '甄别规则', '机会数量', '金额合计'], filter_data, [1, 6, 2, 3])
-
-    for cff in chart_files:
-        if '有效业务机会_funnel' in cff:
-            doc.add_picture(cff, width=Inches(6))
-            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            break
+    # 插入甄别漏斗图表
+    if '有效业务机会_funnel' in charts:
+        doc.add_picture(charts['有效业务机会_funnel'], width=Inches(7))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     h2 = doc.add_heading('4.2 高价值机会Top20', level=2)
     for run in h2.runs: set_run_font(run, font_name='宋体')
 
     if not analyzer.high_value.empty:
-        top_data = []
+        hv_rows = []
         for idx, row in analyzer.high_value.head(20).iterrows():
-            top_data.append([
-                idx + 1, row['业务机会名'], row['阶段'], row['业务机会所有人'],
+            hv_rows.append([
+                idx+1, row['业务机会名'], row['阶段'], row['业务机会所有人'],
                 format_amount(row['_amt']), format_amount(row['_weighted_amt']),
-                row['_total_score']
+                f"{row['_total_score']:.0f}分"
             ])
-        add_styled_table(doc, ['排名', '业务机会名', '阶段', '负责人', '名义金额', '加权金额', '综合评分'],
-                         top_data, [1, 4, 2, 2, 2, 2, 2])
+        add_styled_table(doc, ['排名', '业务机会名', '阶段', '负责人', '金额', '加权金额', '综合评分'],
+                        hv_rows, [1, 5, 2, 2, 2, 2, 2])
 
-        for cff in chart_files:
-            if 'high_value_top20' in cff:
-                doc.add_picture(cff, width=Inches(6))
-                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                break
+        # 插入高价值机会图表
+        if 'high_value_top20' in charts:
+            doc.add_picture(charts['high_value_top20'], width=Inches(7))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+    # 第五章：人员漏斗透视
     doc.add_page_break()
-
     h1 = doc.add_heading('五、人员漏斗透视', level=1)
     for run in h1.runs: set_run_font(run, font_name='宋体')
 
-    owner_dist = analyzer.summary.get('owner_distribution', {})
-    if owner_dist:
-        owner_data = []
-        for owner, data in sorted(owner_dist.items(), key=lambda x: -x[1]['amount']):
-            owner_data.append([
-                owner, data['count'], format_amount(data['amount']),
-                format_amount(data['weighted'])
+    h2 = doc.add_heading('5.1 销售人员业绩分布', level=2)
+    for run in h2.runs: set_run_font(run, font_name='宋体')
+
+    od = analyzer.summary.get('owner_distribution', {})
+    if od:
+        od_rows = []
+        for name, stats in sorted(od.items(), key=lambda x: -x[1]['weighted'])[:20]:
+            od_rows.append([
+                name, stats['count'], format_amount(stats['amount']),
+                format_amount(stats['weighted'])
             ])
         add_styled_table(doc, ['销售人员', '有效机会数', '名义金额', '加权金额'],
-                         owner_data, [3, 2, 3, 3])
+                        od_rows, [3, 2, 3, 3])
 
-        for cff in chart_files:
-            if 'owner_comparison' in cff:
-                doc.add_picture(cff, width=Inches(6))
-                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                break
+        # 插入人员对比图表
+        if 'owner_comparison' in charts:
+            doc.add_picture(charts['owner_comparison'], width=Inches(7))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+    # 第六章：管理行动建议（补充）
     doc.add_page_break()
-
     h1 = doc.add_heading('六、管理行动建议', level=1)
     for run in h1.runs: set_run_font(run, font_name='宋体')
 
-    suggestions = []
-    if analyzer.summary['invalid_count'] / max(s["total_count"], 1) > 0.3:
-        suggestions.append('• 无效机会占比超过30%，建议开展数据清理专项行动，重点清理僵尸单和停滞单')
-    stage_dist = analyzer.summary.get('stage_distribution', {})
-    if stage_dist:
-        total_amt = sum(v['amount'] for v in stage_dist.values())
-        if total_amt > 0:
-            prep_pct = stage_dist.get('签约准备', {}).get('amount', 0) / total_amt
-            if prep_pct < 0.05:
-                suggestions.append('• 签约准备阶段金额占比不足5%，短期业绩风险高，需加快项目推进速度')
-            tech_pct = stage_dist.get('技术认可', {}).get('amount', 0) / total_amt
-            if tech_pct > 0.3:
-                suggestions.append('• 技术认可阶段金额占比超过30%，存在项目堆积风险，需排查技术卡点')
-    if suggestions:
-        for s in suggestions:
-            p = doc.add_paragraph()
-            r = p.add_run(s)
-            set_run_font(r, font_name='宋体', size=Pt(11), color=RGBColor(231, 76, 60))
-    else:
-        doc.add_paragraph('• 销售漏斗整体健康度良好，建议维持现有跟进节奏，重点关注高价值项目推进')
+    h2 = doc.add_heading('6.1 紧急行动项（1周内）', level=2)
+    for run in h2.runs: set_run_font(run, font_name='宋体')
 
-    remove_empty_paragraph_before_picture(doc)
+    urgent_actions = [
+        '• 清理停滞项目：对签约准备阶段超过180天、技术/商务认可超过360天的项目进行逐一核实，确认是否继续跟进或直接关闭',
+        '• 零金额/微型金额项目处理：对金额为0或小于5000元的项目进行筛选，无价值项目直接清理',
+        '• 超期未更新项目跟进：对超过180天未更新的项目，要求销售人员在3个工作日内完成状态更新',
+        '• 阶段概率校准：对签约准备阶段可能性低于90%的项目，重新评估阶段合理性'
+    ]
+    for action in urgent_actions:
+        p = doc.add_paragraph()
+        r = p.add_run(action)
+        set_run_font(r, font_name='宋体', size=Pt(10), bold=True)
+        r.font.color.rgb = RGBColor(220, 53, 69)
+
+    h2 = doc.add_heading('6.2 短期改进项（1个月内）', level=2)
+    for run in h2.runs: set_run_font(run, font_name='宋体')
+
+    short_actions = [
+        '• 漏斗形状优化：针对"大肚腩"阶段（客户立项/技术认可占比过高），制定推进计划，加速项目流转',
+        '• 销售人员赋能：对加权金额较低的销售人员进行一对一辅导，提升项目跟进质量',
+        '• 数据质量提升：规范业务机会录入标准，确保必填字段（金额、预计签约日期、阶段修改日期）完整准确',
+        '• 高价值项目聚焦：建立Top20高价值项目专项跟进机制，每周复盘推进进度'
+    ]
+    for action in short_actions:
+        p = doc.add_paragraph()
+        r = p.add_run(action)
+        set_run_font(r, font_name='宋体', size=Pt(10))
+        r.font.color.rgb = RGBColor(255, 193, 7)
+
+    h2 = doc.add_heading('6.3 长期优化项（3个月内）', level=2)
+    for run in h2.runs: set_run_font(run, font_name='宋体')
+
+    long_actions = [
+        '• 建立漏斗健康度监控体系：每周自动生成漏斗分析报告，监控各阶段转化率和流速',
+        '• 完善阶段定义与考核机制：明确各销售阶段的判定标准和推进要求，将漏斗健康度纳入销售人员考核',
+        '• 客户分层管理：基于高价值项目特征，建立客户分层体系，优化资源配置',
+        '• 数字化工具升级：基于分析结果优化CRM系统，增加自动提醒和异常预警功能'
+    ]
+    for action in long_actions:
+        p = doc.add_paragraph()
+        r = p.add_run(action)
+        set_run_font(r, font_name='宋体', size=Pt(10))
+        r.font.color.rgb = RGBColor(40, 167, 69)
+
+    # 附录A：数据字典
+    doc.add_page_break()
+    h1 = doc.add_heading('附录A：数据字典', level=1)
+    for run in h1.runs: set_run_font(run, font_name='宋体')
+
+    dict_rows = []
+    for col in ALL_STANDARD_NAMES[:30]:  # 显示前30个核心字段
+        desc = {
+            '阶段': '业务机会当前所处的销售阶段',
+            '预计签约金额': '项目预计签约的总金额',
+            '业务机会所有人': '负责该项目的销售人员',
+            '创建日期': '业务机会录入系统的日期',
+            '预计签约日期': '项目预计完成签约的日期',
+            '阶段修改日期': '最近一次阶段变更的日期',
+            '可能性': '项目成功签约的概率（百分比）',
+            '更新时间': '业务机会最近一次修改的时间'
+        }.get(col, '无详细说明')
+        dict_rows.append([col, desc])
+
+    add_styled_table(doc, ['字段名', '字段说明'], dict_rows, [4, 10])
+
+    # 附录B：评分规则说明
+    doc.add_page_break()
+    h1 = doc.add_heading('附录B：评分规则说明', level=1)
+    for run in h1.runs: set_run_font(run, font_name='宋体')
+
+    score_rules = [
+        ['阶段得分（50分）', '根据销售阶段权重计算：销售线索2.5分、公司立项5分、客户立项15分、技术认可25分、商务认可37.5分、签约准备/已赢单50分'],
+        ['金额得分（30分）', '5000-3万：5分；3-10万：10分；10-50万：20分；50万以上：30分'],
+        ['类型得分（20分）', '直签用户：20分；其他类型：0分'],
+        ['综合得分', '阶段得分 + 金额得分 + 类型得分（满分100分）']
+    ]
+    add_styled_table(doc, ['评分维度', '规则说明'], score_rules, [3, 11])
+
+    # 保存文档
     doc.save(output_path)
+    remove_empty_paragraph_before_picture(doc)  # 清理空段落
+    doc.save(output_path)  # 重新保存
 
+    return output_path
 
 # ================================================================
-# Streamlit 主界面（仅替换UI，逻辑完全不变）
+# 主界面（移除下载按钮，自动保存报告）
 # ================================================================
 def main():
-    st.set_page_config(page_title="部门业务机会分析", page_icon="📊", layout="wide")
-    st.title("📊 销售漏斗智能分析工具")
-    st.markdown("---")
+    root = tk.Tk()
+    root.title('销售漏斗智能分析工具 v1.0')
+    root.geometry('600x400')
+    root.resizable(False, False)
 
-    # 侧边栏
-    st.sidebar.header("📁 上传数据文件")
-    uploaded_file = st.sidebar.file_uploader("选择Excel/CSV文件", type=["xlsx", "xls", "csv"])
-    output_dir = st.sidebar.text_input("报告保存目录", value=os.getcwd())
-    run_btn = st.sidebar.button("🚀 开始分析", type="primary")
+    def select_file():
+        file_path = filedialog.askopenfilename(
+            title='选择Excel文件',
+            filetypes=[('Excel文件', '*.xlsx *.xls *.csv'), ('所有文件', '*.*')]
+        )
+        if not file_path:
+            return
 
-    # 主内容区
-    if uploaded_file and run_btn:
-        with st.spinner("正在读取数据..."):
-            temp_path = "temp_data.xlsx"
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            df, header = smart_read_excel(temp_path)
-            st.success(f"✅ 读取成功：{len(df)} 行，{len(df.columns)} 列")
+        try:
+            # 读取数据
+            status_label.config(text='正在读取数据...')
+            root.update()
+            df, header = smart_read_excel(file_path)
 
-        with st.spinner("正在分析数据..."):
+            # 运行分析
+            status_label.config(text='正在分析数据...')
+            root.update()
             analyzer = FunnelAnalyzer(df)
-            summary = analyzer.run_analysis()
+            analyzer.run_analysis()
 
-        with st.spinner("生成图表与报告..."):
-            chart_dir = os.path.join(output_dir, "charts")
-            chart_files = generate_charts(analyzer, chart_dir)
-            report_name = f"销售漏斗分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-            report_path = os.path.join(output_dir, report_name)
-            generate_report(analyzer, chart_files, report_path)
+            # 生成图表（内存中）
+            status_label.config(text='正在生成图表...')
+            root.update()
+            charts = generate_charts(analyzer)
 
-        # 显示结果
-        st.subheader("📈 核心数据概览")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("总记录数", summary["total_count"])
-        col2.metric("有效机会", summary["valid_count"])
-        col3.metric("无效机会", summary["invalid_count"])
-        col4.metric("高价值机会", summary["high_value_count"])
+            # 生成并保存报告
+            status_label.config(text='正在生成报告...')
+            root.update()
+            report_path = generate_report(analyzer, charts)
 
-        st.subheader("📊 分析图表")
-        for p in chart_files:
-            st.image(p, use_column_width=True)
+            status_label.config(text=f'分析完成！报告已保存至：\n{report_path}')
+            messagebox.showinfo('成功', f'分析完成！\n报告已保存至：\n{report_path}')
 
-        st.subheader("📥 下载报告")
-        with open(report_path, "rb") as f:
-            st.download_button("📄 下载Word报告", f, file_name=report_name)
+        except Exception as e:
+            status_label.config(text=f'出错：{str(e)}')
+            messagebox.showerror('错误', f'分析失败：{str(e)}')
 
-        os.remove(temp_path)
+    # 界面布局
+    title_label = tk.Label(root, text='销售漏斗智能分析工具', font=('宋体', 18, 'bold'))
+    title_label.pack(pady=30)
 
+    select_btn = tk.Button(root, text='选择Excel文件开始分析', font=('宋体', 12),
+                          width=30, height=2, command=select_file)
+    select_btn.pack(pady=20)
 
-if __name__ == "__main__":
+    status_label = tk.Label(root, text='等待选择文件...', font=('宋体', 10),
+                           fg='gray', justify=tk.CENTER)
+    status_label.pack(pady=50)
+
+    # 版权信息
+    copyright_label = tk.Label(root, text='© 2026 销售分析部', font=('宋体', 9), fg='gray')
+    copyright_label.pack(side=tk.BOTTOM, pady=10)
+
+    root.mainloop()
+
+if __name__ == '__main__':
     main()
