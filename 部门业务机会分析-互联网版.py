@@ -17,28 +17,72 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
 # ================================================================
-# 全局字体修复：自动搜索并注册系统中所有中文字体，彻底解决图表中文小方格
+# 全局字体修复：删除缓存 + 扫描注册所有中文TTF，彻底解决方格
 # ================================================================
 def _fix_chinese_font():
-    registered = set()
-    for f in fm.fontManager.ttflist:
-        lower = f.name.lower()
-        if any(k in lower for k in ['hei', 'yahei', 'song', 'cjk', 'noto', 'ming', 'gothic', 'fang', 'kai', 'wenquan', 'heiti', 'pingfang', 'source han', 'droid fallback']):
-            fm.fontManager.addfont(f.fname)
-            registered.add(f.name)
-    if registered:
-        for rn in ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
-                    'PingFang SC', 'Source Han Sans CN', 'Droid Sans Fallback']:
-            if rn in registered:
-                plt.rcParams['font.sans-serif'] = [rn, 'DejaVu Sans']
-                plt.rcParams['axes.unicode_minus'] = False
-                return
-        first = next(iter(registered))
-        plt.rcParams['font.sans-serif'] = [first, 'DejaVu Sans']
-        plt.rcParams['axes.unicode_minus'] = False
+    import glob
+    # 1. 删除matplotlib字体缓存，强制重建
+    cache_dir = matplotlib.get_cachedir()
+    for cache_file in glob.glob(os.path.join(cache_dir, 'fontlist-*.json')):
+        try:
+            os.remove(cache_file)
+        except Exception:
+            pass
+    # 2. 扫描系统常见中文字体目录，逐个注册ttf文件
+    font_dirs = []
+    if os.name == 'nt':
+        windir = os.environ.get('WINDIR', r'C:\Windows')
+        font_dirs.append(os.path.join(windir, 'Fonts'))
+        local_app = os.environ.get('LOCALAPPDATA', '')
+        if local_app:
+            font_dirs.append(os.path.join(local_app, 'Microsoft', 'Windows', 'Fonts'))
+    else:
+        font_dirs.extend(['/usr/share/fonts', '/usr/local/share/fonts',
+                          os.path.expanduser('~/.fonts'), os.path.expanduser('~/.local/share/fonts')])
+    cn_keywords = ['simhei', 'msyh', 'yahei', 'simsun', 'song', 'noto', 'cjk',
+                   'wenquanyi', 'heiti', 'pingfang', 'fang', 'kai', 'gothic', 'ming', 'droid']
+    registered_names = []
+    for d in font_dirs:
+        if not os.path.isdir(d):
+            continue
+        for fname in os.listdir(d):
+            fl = fname.lower()
+            if fl.endswith('.ttf') or fl.endswith('.ttc'):
+                if any(kw in fl for kw in cn_keywords):
+                    fpath = os.path.join(d, fname)
+                    try:
+                        fm.fontManager.addfont(fpath)
+                        try:
+                            prop = fm.FontProperties(fname=fpath)
+                            registered_names.append(prop.get_name())
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+    # 3. 重建缓存
+    try:
+        fm._load_fontmanager(try_read_cache=False)
+    except Exception:
+        pass
+    # 4. 设置rcParams
+    preferred = ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
+                 'PingFang SC', 'Source Han Sans CN', 'SimSun', 'Droid Sans Fallback']
+    available = {f.name for f in fm.fontManager.ttflist}
+    chosen = None
+    for pf in preferred:
+        if pf in available:
+            chosen = pf
+            break
+    if chosen is None and registered_names:
+        for rn in registered_names:
+            if rn in available:
+                chosen = rn
+                break
+    if chosen:
+        plt.rcParams['font.sans-serif'] = [chosen, 'DejaVu Sans']
     else:
         plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'DejaVu Sans']
-        plt.rcParams['axes.unicode_minus'] = False
+    plt.rcParams['axes.unicode_minus'] = False
 
 _fix_chinese_font()
 
