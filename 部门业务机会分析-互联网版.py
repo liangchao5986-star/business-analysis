@@ -11,6 +11,36 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+# ================================================================
+# 全局字体修复：自动搜索并注册系统中所有中文字体，彻底解决图表中文小方格
+# ================================================================
+def _fix_chinese_font():
+    registered = set()
+    for f in fm.fontManager.ttflist:
+        lower = f.name.lower()
+        if any(k in lower for k in ['hei', 'yahei', 'song', 'cjk', 'noto', 'ming', 'gothic', 'fang', 'kai', 'wenquan', 'heiti', 'pingfang', 'source han', 'droid fallback']):
+            fm.fontManager.addfont(f.fname)
+            registered.add(f.name)
+    if registered:
+        for rn in ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
+                    'PingFang SC', 'Source Han Sans CN', 'Droid Sans Fallback']:
+            if rn in registered:
+                plt.rcParams['font.sans-serif'] = [rn, 'DejaVu Sans']
+                plt.rcParams['axes.unicode_minus'] = False
+                return
+        first = next(iter(registered))
+        plt.rcParams['font.sans-serif'] = [first, 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+    else:
+        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+
+_fix_chinese_font()
 
 # ================================================================
 # 常量
@@ -426,14 +456,6 @@ class FunnelAnalyzer:
 # 图表生成
 # ================================================================
 def generate_charts(analyzer, save_dir):
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    plt.rcParams['font.sans-serif'] = [
-        'SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei',
-        'Arial Unicode MS', 'Noto Sans CJK SC', 'DejaVu Sans'
-    ]
-    plt.rcParams['axes.unicode_minus'] = False
     os.makedirs(save_dir, exist_ok=True)
     cf = []
 
@@ -1087,7 +1109,7 @@ def main():
         st.header('📁 数据源')
         uploaded_file = st.file_uploader('选择业务机会Excel文件', type=['xlsx', 'xls', 'csv'])
         st.header('💾 输出设置')
-        output_dir = st.text_input('报告保存路径', value=os.path.join(os.path.expanduser('~'), 'Desktop'))
+        output_dir = st.text_input('报告保存路径', value='D:\\')
         st.header('📋 分析内容')
         st.markdown(
             '✅ 仅分析2026年预计签约项目\n\n'
