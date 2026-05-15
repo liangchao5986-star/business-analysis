@@ -15,20 +15,14 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+from matplotlib.font_manager import FontProperties
 
 # ================================================================
-# 全局字体修复：删除缓存 + 扫描注册所有中文TTF，彻底解决方格
+# 全局字体修复：删除缓存 + 用FontProperties直接绑定TTF文件路径
+# 彻底解决中文方格问题（不依赖rcParams字体名查找）
 # ================================================================
-def _fix_chinese_font():
-    import glob
-    # 1. 删除matplotlib字体缓存，强制重建
-    cache_dir = matplotlib.get_cachedir()
-    for cache_file in glob.glob(os.path.join(cache_dir, 'fontlist-*.json')):
-        try:
-            os.remove(cache_file)
-        except Exception:
-            pass
-    # 2. 扫描系统常见中文字体目录，逐个注册ttf文件
+def _find_chinese_ttf():
+    """扫描系统字体目录，找到第一个可用的中文TTF文件并返回路径"""
     font_dirs = []
     if os.name == 'nt':
         windir = os.environ.get('WINDIR', r'C:\Windows')
@@ -38,53 +32,68 @@ def _fix_chinese_font():
             font_dirs.append(os.path.join(local_app, 'Microsoft', 'Windows', 'Fonts'))
     else:
         font_dirs.extend(['/usr/share/fonts', '/usr/local/share/fonts',
-                          os.path.expanduser('~/.fonts'), os.path.expanduser('~/.local/share/fonts')])
+                          os.path.expanduser('~/.fonts'),
+                          os.path.expanduser('~/.local/share/fonts')])
     cn_keywords = ['simhei', 'msyh', 'yahei', 'simsun', 'song', 'noto', 'cjk',
                    'wenquanyi', 'heiti', 'pingfang', 'fang', 'kai', 'gothic', 'ming', 'droid']
-    registered_names = []
+    preferred_order = ['simhei', 'msyh', 'yahei', 'simsun', 'noto', 'cjk',
+                       'wenquanyi', 'heiti', 'pingfang', 'fangsong', 'kaiti']
+    found = []
     for d in font_dirs:
         if not os.path.isdir(d):
             continue
         for fname in os.listdir(d):
             fl = fname.lower()
-            if fl.endswith('.ttf') or fl.endswith('.ttc'):
+            if fl.endswith('.ttf'):
                 if any(kw in fl for kw in cn_keywords):
                     fpath = os.path.join(d, fname)
-                    try:
-                        fm.fontManager.addfont(fpath)
-                        try:
-                            prop = fm.FontProperties(fname=fpath)
-                            registered_names.append(prop.get_name())
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-    # 3. 重建缓存
+                    found.append((fl, fpath))
+    if not found:
+        for d in font_dirs:
+            if not os.path.isdir(d):
+                continue
+            for fname in os.listdir(d):
+                fl = fname.lower()
+                if fl.endswith('.ttc'):
+                    if any(kw in fl for kw in cn_keywords):
+                        fpath = os.path.join(d, fname)
+                        found.append((fl, fpath))
+    if not found:
+        return None
+    for pref in preferred_order:
+        for fl, fpath in found:
+            if pref in fl:
+                return fpath
+    return found[0][1]
+
+# 删除缓存强制重建
+import glob as _glob
+_cache_dir = matplotlib.get_cachedir()
+for _cf in _glob.glob(os.path.join(_cache_dir, 'fontlist-*.json')):
     try:
-        fm._load_fontmanager(try_read_cache=False)
+        os.remove(_cf)
     except Exception:
         pass
-    # 4. 设置rcParams
-    preferred = ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC',
-                 'PingFang SC', 'Source Han Sans CN', 'SimSun', 'Droid Sans Fallback']
-    available = {f.name for f in fm.fontManager.ttflist}
-    chosen = None
-    for pf in preferred:
-        if pf in available:
-            chosen = pf
-            break
-    if chosen is None and registered_names:
-        for rn in registered_names:
-            if rn in available:
-                chosen = rn
-                break
-    if chosen:
-        plt.rcParams['font.sans-serif'] = [chosen, 'DejaVu Sans']
-    else:
-        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
 
-_fix_chinese_font()
+# 找到中文TTF并注册
+_CN_TTF_PATH = _find_chinese_ttf()
+_CN_FONT_PROP = None
+if _CN_TTF_PATH and os.path.isfile(_CN_TTF_PATH):
+    try:
+        fm.fontManager.addfont(_CN_TTF_PATH)
+        _CN_FONT_PROP = FontProperties(fname=_CN_TTF_PATH)
+        _cn_name = _CN_FONT_PROP.get_name()
+        plt.rcParams['font.sans-serif'] = [_cn_name] + plt.rcParams.get('font.sans-serif', [])
+        plt.rcParams['font.family'] = 'sans-serif'
+    except Exception:
+        _CN_FONT_PROP = None
+plt.rcParams['axes.unicode_minus'] = False
+
+def _fp(size=12):
+    """返回绑定TTF文件的中文字体属性，确保每个图表都正确使用"""
+    if _CN_FONT_PROP:
+        return FontProperties(fname=_CN_TTF_PATH, size=size)
+    return FontProperties(size=size)
 
 # ================================================================
 # 常量
@@ -497,7 +506,7 @@ class FunnelAnalyzer:
         }
 
 # ================================================================
-# 图表生成
+# 图表生成（关键修改：所有文字均通过fontproperties=_fp()绑定TTF）
 # ================================================================
 def generate_charts(analyzer, save_dir):
     os.makedirs(save_dir, exist_ok=True)
@@ -517,11 +526,11 @@ def generate_charts(analyzer, save_dir):
         bars = ax.barh(range(len(stages)), amounts, color=bar_colors, edgecolor='white', height=0.6)
         for b, c, a in zip(bars, counts, amounts):
             ax.text(b.get_width() + max(amounts) * 0.01, b.get_y() + b.get_height() / 2,
-                    f'{a:.1f}万({c}单)', va='center', fontsize=9)
+                    f'{a:.1f}万({c}单)', va='center', fontproperties=_fp(9))
         ax.set_yticks(range(len(stages)))
-        ax.set_yticklabels(stages, fontsize=10)
-        ax.set_xlabel('金额(万元)')
-        ax.set_title('销售漏斗各阶段金额分布', fontsize=13, fontweight='bold')
+        ax.set_yticklabels(stages, fontproperties=_fp(10))
+        ax.set_xlabel('金额(万元)', fontproperties=_fp(11))
+        ax.set_title('销售漏斗各阶段金额分布', fontproperties=_fp(13), fontweight='bold')
         ax.invert_yaxis()
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
@@ -542,8 +551,10 @@ def generate_charts(analyzer, save_dir):
             parts = val.split('：', 1)
             labels.append(parts[0] if parts else val)
         ax.pie(list(rc.values()), labels=labels, autopct='%1.1f%%',
-               explode=[0.05] * len(rc), startangle=90, textprops={'fontsize': 8}, pctdistance=0.85)
-        ax.set_title(f'无效机会原因分类(共{len(analyzer.invalid_records)}条)', fontsize=13, fontweight='bold')
+               explode=[0.05] * len(rc), startangle=90, textprops={'fontproperties': _fp(8)},
+               pctdistance=0.85)
+        ax.set_title(f'无效机会原因分类(共{len(analyzer.invalid_records)}条)',
+                     fontproperties=_fp(13), fontweight='bold')
         plt.tight_layout()
         p = os.path.join(save_dir, 'chart_invalid_reasons.png')
         plt.savefig(p, dpi=150, bbox_inches='tight')
@@ -562,10 +573,10 @@ def generate_charts(analyzer, save_dir):
         ax.bar([i - bw / 2 for i in x], nom, bw, label='名义金额', color='#3498db', alpha=0.8)
         ax.bar([i + bw / 2 for i in x], wgt, bw, label='加权金额', color='#e74c3c', alpha=0.8)
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=45, ha='right', fontsize=16)
-        ax.set_ylabel('金额(万元)', fontsize=14)
-        ax.set_title('销售人员有效漏斗对比', fontsize=16, fontweight='bold')
-        ax.legend(fontsize=18)
+        ax.set_xticklabels(names, rotation=45, ha='right', fontproperties=_fp(12))
+        ax.set_ylabel('金额(万元)', fontproperties=_fp(14))
+        ax.set_title('销售人员有效漏斗对比', fontproperties=_fp(16), fontweight='bold')
+        ax.legend(prop=_fp(14))
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
@@ -586,13 +597,13 @@ def generate_charts(analyzer, save_dir):
         ax.barh([i + 0.2 for i in y], wgt, 0.4, label='加权金额', color='#27ae60', alpha=0.8)
         for i, s in enumerate(sc):
             ax.text(max(nom[i], wgt[i]) + max(nom.max(), wgt.max()) * 0.02, i,
-                    f'{s:.0f}分', va='center', fontsize=14, color='#e74c3c', fontweight='bold')
+                    f'{s:.0f}分', va='center', fontproperties=_fp(14), color='#e74c3c', fontweight='bold')
         ax.set_yticks(y)
-        ax.set_yticklabels(names, fontsize=14)
-        ax.set_xlabel('金额(万元)', fontsize=14)
-        ax.set_title('高价值机会Top20(含综合评分)', fontsize=16, fontweight='bold')
+        ax.set_yticklabels(names, fontproperties=_fp(12))
+        ax.set_xlabel('金额(万元)', fontproperties=_fp(14))
+        ax.set_title('高价值机会Top20(含综合评分)', fontproperties=_fp(16), fontweight='bold')
         ax.invert_yaxis()
-        ax.legend(fontsize=18)
+        ax.legend(prop=_fp(14))
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
@@ -608,14 +619,14 @@ def generate_charts(analyzer, save_dir):
     ax.plot(range(len(fn)), fc_vals, 'o-', color='#2c3e50', linewidth=2, markersize=8)
     for i, (n, c) in enumerate(zip(fn, fc_vals)):
         ax.annotate(str(c), (i, c), textcoords="offset points", xytext=(0, 12),
-                    ha='center', fontsize=18, fontweight='bold')
+                    ha='center', fontproperties=_fp(14), fontweight='bold')
     ax.set_xticks(range(len(fn)))
     ax.set_xticklabels(
         [n.split('｜')[-1] if '｜' in n else n for n in fn],
-        rotation=25, ha='right', fontsize=14
+        rotation=25, ha='right', fontproperties=_fp(12)
     )
-    ax.set_ylabel('机会数量', fontsize=14)
-    ax.set_title('有效业务机会甄别过程漏斗', fontsize=16, fontweight='bold')
+    ax.set_ylabel('机会数量', fontproperties=_fp(14))
+    ax.set_title('有效业务机会甄别过程漏斗', fontproperties=_fp(16), fontweight='bold')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     plt.tight_layout()
@@ -707,7 +718,6 @@ def generate_report(analyzer, chart_files, output_path):
     section.bottom_margin = Cm(2)
     section.left_margin = Cm(2)
     section.right_margin = Cm(2)
-    # 修改默认样式的字体为宋体
     style = doc.styles['Normal']
     style.font.name = '宋体'
     style.element.rPr.rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}eastAsia', '宋体')
@@ -718,9 +728,9 @@ def generate_report(analyzer, chart_files, output_path):
     t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = t.add_run('销售漏斗智能分析报告')
     set_run_font(r, font_name='宋体', size=Pt(28), bold=True, color=RGBColor(44, 62, 80))
-    st = doc.add_paragraph()
-    st.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = st.add_run('基于有效业务机会模型与漏斗健康度理论')
+    st_p = doc.add_paragraph()
+    st_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = st_p.add_run('基于有效业务机会模型与漏斗健康度理论')
     set_run_font(r, font_name='宋体', size=Pt(14), color=RGBColor(127, 140, 141))
     doc.add_paragraph('')
     dp = doc.add_paragraph()
@@ -764,7 +774,6 @@ def generate_report(analyzer, chart_files, output_path):
     doc.add_page_break()
     s = analyzer.summary
 
-    # ---- 第一章 ----
     h1 = doc.add_heading('一、数据总览与核心指标', level=1)
     for run in h1.runs:
         set_run_font(run, font_name='宋体')
@@ -812,7 +821,6 @@ def generate_report(analyzer, chart_files, output_path):
             break
     doc.add_page_break()
 
-    # ---- 第二章 ----
     h1 = doc.add_heading('二、漏斗健康度诊断', level=1)
     for run in h1.runs:
         set_run_font(run, font_name='宋体')
@@ -858,7 +866,6 @@ def generate_report(analyzer, chart_files, output_path):
             break
     doc.add_page_break()
 
-    # ---- 第三章 ----
     h1 = doc.add_heading('三、无效业务机会识别与剔除', level=1)
     for run in h1.runs:
         set_run_font(run, font_name='宋体')
@@ -908,7 +915,6 @@ def generate_report(analyzer, chart_files, output_path):
             set_run_font(r, font_name='宋体', size=Pt(9), color=RGBColor(149, 165, 166))
     doc.add_page_break()
 
-    # ---- 第四章 (合并有效业务机会甄别与高价值机会) ----
     h1 = doc.add_heading('四、有效业务机会甄别与高价值机会清单', level=1)
     for run in h1.runs:
         set_run_font(run, font_name='宋体')
@@ -1005,7 +1011,6 @@ def generate_report(analyzer, chart_files, output_path):
             set_run_font(run, font_name='宋体')
     doc.add_page_break()
 
-    # ---- 第五章 (原第六章) ----
     h1 = doc.add_heading('五、人员漏斗透视', level=1)
     for run in h1.runs:
         set_run_font(run, font_name='宋体')
@@ -1032,7 +1037,6 @@ def generate_report(analyzer, chart_files, output_path):
                          od_rows, [2, 2, 3, 3, 2, 6])
     doc.add_page_break()
 
-    # ---- 第六章 (原第七章) ----
     h1 = doc.add_heading('六、管理行动建议', level=1)
     for run in h1.runs:
         set_run_font(run, font_name='宋体')
@@ -1109,14 +1113,8 @@ def generate_report(analyzer, chart_files, output_path):
     r_note.bold = True
     r_note.font.color.rgb = RGBColor(44, 62, 80)
 
-    # ==========================================
-    # 彻底清除因图片插入产生的空段落空白页
-    # ==========================================
     remove_empty_paragraph_before_picture(doc)
 
-    # ==========================================
-    # 仅增加页码
-    # ==========================================
     footer = section.footer
     footer.is_linked_to_previous = False
     p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
@@ -1181,7 +1179,6 @@ def main():
             log_area.code('\n'.join(log_lines))
 
         try:
-            # 保存上传文件到临时路径
             tmp_dir = tempfile.mkdtemp()
             tmp_path = os.path.join(tmp_dir, uploaded_file.name)
             with open(tmp_path, 'wb') as f:
@@ -1237,6 +1234,7 @@ def main():
             if analyzer.missing_cols:
                 _log(f' ⚠️ 仍有缺失列: {", ".join(analyzer.missing_cols)}')
 
+            _log(f' 🖋️ 中文字体: {_CN_TTF_PATH}')
             _log('📊 生成图表...')
             cd = os.path.join(output_dir, 'charts')
             charts = generate_charts(analyzer, cd)
@@ -1252,7 +1250,6 @@ def main():
 
             st.success(f'✅ 报告已生成：{rp}')
 
-            # 提供下载按钮
             with open(rp, 'rb') as f:
                 st.download_button(
                     '📥 下载分析报告',
@@ -1261,7 +1258,6 @@ def main():
                     mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                 )
 
-            # 在页面上展示图表
             st.subheader('📊 分析图表')
             chart_cols = st.columns(2)
             chart_idx = 0
