@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import pytz
+import time
 from collections import defaultdict
 from docx import Document
 from docx.shared import Inches, Pt, Cm, RGBColor
@@ -18,11 +18,16 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from matplotlib.font_manager import FontProperties
 
-# 获取北京时间
+# ================================================================
+# 北京时间处理（使用标准库，无额外依赖）
+# ================================================================
 def get_beijing_time():
-    """返回北京时间"""
-    beijing_tz = pytz.timezone('Asia/Shanghai')
-    return datetime.now(beijing_tz)
+    """返回北京时间（UTC+8）"""
+    # 获取当前UTC时间
+    utc_now = datetime.utcnow()
+    # 加上8小时得到北京时间
+    beijing_now = utc_now + timedelta(hours=8)
+    return beijing_now
 
 # ================================================================
 # 彻底解决中文方格：直接扫描TTF文件路径，用fname绑定，不依赖字体名查找
@@ -68,14 +73,20 @@ def _setup_matplotlib_font():
     """设置matplotlib全局字体，使用TTF文件路径"""
     if _CN_TTF and os.path.isfile(_CN_TTF):
         # 清除现有字体缓存，添加新字体
-        fm.fontManager.addfont(_CN_TTF)
+        try:
+            fm.fontManager.addfont(_CN_TTF)
+        except:
+            pass
         # 获取字体名称
-        prop = FontProperties(fname=_CN_TTF)
-        font_name = prop.get_name()
-        plt.rcParams['font.family'] = font_name
-        plt.rcParams['font.sans-serif'] = [font_name]
-        plt.rcParams['axes.unicode_minus'] = False
-        return font_name
+        try:
+            prop = FontProperties(fname=_CN_TTF)
+            font_name = prop.get_name()
+            plt.rcParams['font.family'] = font_name
+            plt.rcParams['font.sans-serif'] = [font_name]
+            plt.rcParams['axes.unicode_minus'] = False
+            return font_name
+        except:
+            pass
     # 备选方案：尝试常见中文字体名
     fallback_fonts = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Arial Unicode MS', 'DejaVu Sans']
     for font_name in fallback_fonts:
