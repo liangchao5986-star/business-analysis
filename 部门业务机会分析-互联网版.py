@@ -4,7 +4,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import time
 from collections import defaultdict
 from docx import Document
 from docx.shared import Inches, Pt, Cm, RGBColor
@@ -17,23 +16,23 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from matplotlib.font_manager import FontProperties
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
 
 # ================================================================
 # 北京时间处理（使用标准库，无额外依赖）
 # ================================================================
 def get_beijing_time():
     """返回北京时间（UTC+8）"""
-    # 获取当前UTC时间
     utc_now = datetime.utcnow()
-    # 加上8小时得到北京时间
     beijing_now = utc_now + timedelta(hours=8)
     return beijing_now
 
 # ================================================================
-# 彻底解决中文方格：直接扫描TTF文件路径，用fname绑定，不依赖字体名查找
+# 彻底解决中文方格：强制使用系统TTF字体
 # ================================================================
-def _scan_chinese_ttf():
-    """扫描系统字体目录，返回可用的中文TTF文件绝对路径列表（按优先级排序）"""
+def _get_chinese_font_path():
+    """扫描系统字体目录，返回可用的中文TTF文件绝对路径"""
     font_dirs = []
     if os.name == 'nt':
         windir = os.environ.get('WINDIR', r'C:\Windows')
@@ -45,9 +44,11 @@ def _scan_chinese_ttf():
         font_dirs.extend(['/usr/share/fonts', '/usr/local/share/fonts',
                           os.path.expanduser('~/.fonts'),
                           os.path.expanduser('~/.local/share/fonts')])
+    
     cn_kw = ['simhei', 'msyh', 'yahei', 'simsun', 'song', 'noto', 'cjk',
-             'wenquanyi', 'heiti', 'pingfang', 'fangsong', 'kaiti', 'gothic', 'ming', 'droid']
-    pref_order = ['simhei', 'msyh', 'yahei', 'simsun', 'noto', 'cjk', 'wenquanyi', 'heiti', 'pingfang']
+             'wenquanyi', 'heiti', 'pingfang', 'fangsong', 'kaiti', 'gothic', 'ming']
+    pref_order = ['simhei', 'msyh', 'yahei', 'simsun', 'noto', 'cjk']
+    
     found = []
     for d in font_dirs:
         if not os.path.isdir(d):
@@ -55,57 +56,47 @@ def _scan_chinese_ttf():
         try:
             for fname in os.listdir(d):
                 fl = fname.lower()
-                if fl.endswith('.ttf') and any(kw in fl for kw in cn_kw):
+                if (fl.endswith('.ttf') or fl.endswith('.ttc')) and any(kw in fl for kw in cn_kw):
                     found.append((fl, os.path.join(d, fname)))
         except (OSError, PermissionError):
             continue
+    
     if not found:
         return None
+    
     for pref in pref_order:
         for fl, fpath in found:
             if pref in fl:
                 return fpath
+    
     return found[0][1]
 
-_CN_TTF = _scan_chinese_ttf()
+# 获取中文字体路径
+_CHINESE_FONT_PATH = _get_chinese_font_path()
 
-def _setup_matplotlib_font():
-    """设置matplotlib全局字体，使用TTF文件路径"""
-    if _CN_TTF and os.path.isfile(_CN_TTF):
-        # 清除现有字体缓存，添加新字体
-        try:
-            fm.fontManager.addfont(_CN_TTF)
-        except:
-            pass
+# 强制设置matplotlib全局字体
+if _CHINESE_FONT_PATH and os.path.isfile(_CHINESE_FONT_PATH):
+    try:
+        # 添加字体到matplotlib
+        fm.fontManager.addfont(_CHINESE_FONT_PATH)
         # 获取字体名称
-        try:
-            prop = FontProperties(fname=_CN_TTF)
-            font_name = prop.get_name()
-            plt.rcParams['font.family'] = font_name
-            plt.rcParams['font.sans-serif'] = [font_name]
-            plt.rcParams['axes.unicode_minus'] = False
-            return font_name
-        except:
-            pass
-    # 备选方案：尝试常见中文字体名
-    fallback_fonts = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Arial Unicode MS', 'DejaVu Sans']
-    for font_name in fallback_fonts:
-        try:
-            plt.rcParams['font.family'] = font_name
-            plt.rcParams['font.sans-serif'] = [font_name]
-            plt.rcParams['axes.unicode_minus'] = False
-            return font_name
-        except:
-            continue
-    return None
-
-# 初始化matplotlib中文字体
-_SETUP_FONT = _setup_matplotlib_font()
+        font_prop = FontProperties(fname=_CHINESE_FONT_PATH)
+        font_name = font_prop.get_name()
+        plt.rcParams['font.family'] = font_name
+        plt.rcParams['font.sans-serif'] = [font_name]
+        plt.rcParams['axes.unicode_minus'] = False
+    except Exception as e:
+        print(f"字体加载警告: {e}")
+        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+else:
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
 
 def _fp(size=12):
-    """返回直接绑定TTF文件路径的FontProperties，彻底绕过字体名查找"""
-    if _CN_TTF and os.path.isfile(_CN_TTF):
-        return FontProperties(fname=_CN_TTF, size=size)
+    """返回绑定TTF文件路径的FontProperties"""
+    if _CHINESE_FONT_PATH and os.path.isfile(_CHINESE_FONT_PATH):
+        return FontProperties(fname=_CHINESE_FONT_PATH, size=size)
     return FontProperties(size=size)
 
 # ================================================================
@@ -519,7 +510,7 @@ class FunnelAnalyzer:
         }
 
 # ================================================================
-# 图表生成（所有文字用fontproperties=_fp()绑定TTF路径）
+# 图表生成（强制使用中文字体）
 # ================================================================
 def generate_charts(analyzer, save_dir):
     os.makedirs(save_dir, exist_ok=True)
@@ -1251,42 +1242,46 @@ def main():
             if analyzer.missing_cols:
                 _log(f' ⚠️ 仍有缺失列: {", ".join(analyzer.missing_cols)}')
 
-            _log(f' 🖋️ 中文字体TTF: {_CN_TTF}')
+            _log(f' 🖋️ 中文字体路径: {_CHINESE_FONT_PATH}')
             _log('📊 生成图表...')
-            # 确保输出目录存在
-            safe_output_dir = output_dir.strip()
-            if not safe_output_dir:
-                safe_output_dir = os.getcwd()
-            # 移除路径末尾可能多余的反斜杠
-            safe_output_dir = safe_output_dir.rstrip('\\').rstrip('/')
-            # 确保路径有效并创建目录
-            if not os.path.exists(safe_output_dir):
+            
+            # 处理输出目录
+            save_dir = output_dir.strip()
+            if not save_dir:
+                save_dir = os.getcwd()
+            save_dir = save_dir.rstrip('\\').rstrip('/')
+            
+            # 确保目录存在
+            if not os.path.exists(save_dir):
                 try:
-                    os.makedirs(safe_output_dir, exist_ok=True)
-                    _log(f' ✅ 创建目录: {safe_output_dir}')
+                    os.makedirs(save_dir, exist_ok=True)
+                    _log(f' ✅ 创建目录: {save_dir}')
                 except Exception as e:
-                    _log(f' ⚠️ 无法创建目录 {safe_output_dir}，使用当前目录: {e}')
-                    safe_output_dir = os.getcwd()
-            cd = os.path.join(safe_output_dir, 'charts')
+                    _log(f' ⚠️ 无法创建目录 {save_dir}，使用当前目录: {e}')
+                    save_dir = os.getcwd()
+            
+            # 图表保存到用户目录下的charts文件夹
+            cd = os.path.join(save_dir, 'charts')
             charts = generate_charts(analyzer, cd)
             _log(f' ✅ {len(charts)}张图表，保存于: {cd}')
 
             _log('📝 生成DOCX报告...')
             ts = get_beijing_time().strftime('%Y%m%d_%H%M%S')
             rn = f'销售漏斗分析报告_{ts}.docx'
-            rp = os.path.join(safe_output_dir, rn)
+            rp = os.path.join(save_dir, rn)
             generate_report(analyzer, charts, rp)
-            _log(f' ✅ 已保存: {rp}')
+            _log(f' ✅ 报告已保存到: {rp}')
             _log('🎉 分析完成！')
 
-            st.success(f'✅ 报告已生成：{rp}')
-
-            # 读取文件用于下载
+            # 显示成功消息，包含文件路径
+            st.success(f'✅ 报告已生成并保存到：{rp}')
+            
+            # 提供下载按钮
             with open(rp, 'rb') as f:
                 file_data = f.read()
             
             st.download_button(
-                '📥 下载分析报告',
+                '📥 点击下载分析报告',
                 file_data,
                 file_name=rn,
                 mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
