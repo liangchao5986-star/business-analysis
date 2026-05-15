@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import pytz
 from collections import defaultdict
 from docx import Document
 from docx.shared import Inches, Pt, Cm, RGBColor
@@ -15,94 +16,86 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+from matplotlib.font_manager import FontProperties
+
+# 获取北京时间
+def get_beijing_time():
+    """返回北京时间"""
+    beijing_tz = pytz.timezone('Asia/Shanghai')
+    return datetime.now(beijing_tz)
 
 # ================================================================
-# 彻底解决中文方格：直接设置matplotlib全局字体
+# 彻底解决中文方格：直接扫描TTF文件路径，用fname绑定，不依赖字体名查找
 # ================================================================
-def _setup_matplotlib_chinese_font():
-    """设置matplotlib全局中文字体，彻底解决图表中文显示问题"""
-    import warnings
-    warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
-    
-    # 尝试多种方式寻找中文字体
-    font_paths = []
-    
-    # Windows字体目录
+def _scan_chinese_ttf():
+    """扫描系统字体目录，返回可用的中文TTF文件绝对路径列表（按优先级排序）"""
+    font_dirs = []
     if os.name == 'nt':
         windir = os.environ.get('WINDIR', r'C:\Windows')
-        font_dirs = [os.path.join(windir, 'Fonts')]
+        font_dirs.append(os.path.join(windir, 'Fonts'))
         local_app = os.environ.get('LOCALAPPDATA', '')
         if local_app:
             font_dirs.append(os.path.join(local_app, 'Microsoft', 'Windows', 'Fonts'))
     else:
-        font_dirs = ['/usr/share/fonts', '/usr/local/share/fonts',
-                     os.path.expanduser('~/.fonts'),
-                     os.path.expanduser('~/.local/share/fonts')]
-    
-    # 搜索中文字体文件
-    cn_keywords = ['simhei', 'msyh', 'yahei', 'simsun', 'song', 'noto', 'cjk',
-                   'wenquanyi', 'heiti', 'pingfang', 'fangsong', 'kaiti', 'gothic', 'ming']
-    
-    for font_dir in font_dirs:
-        if not os.path.isdir(font_dir):
+        font_dirs.extend(['/usr/share/fonts', '/usr/local/share/fonts',
+                          os.path.expanduser('~/.fonts'),
+                          os.path.expanduser('~/.local/share/fonts')])
+    cn_kw = ['simhei', 'msyh', 'yahei', 'simsun', 'song', 'noto', 'cjk',
+             'wenquanyi', 'heiti', 'pingfang', 'fangsong', 'kaiti', 'gothic', 'ming', 'droid']
+    pref_order = ['simhei', 'msyh', 'yahei', 'simsun', 'noto', 'cjk', 'wenquanyi', 'heiti', 'pingfang']
+    found = []
+    for d in font_dirs:
+        if not os.path.isdir(d):
             continue
         try:
-            for fname in os.listdir(font_dir):
-                fname_lower = fname.lower()
-                if fname_lower.endswith(('.ttf', '.ttc')):
-                    if any(kw in fname_lower for kw in cn_keywords):
-                        full_path = os.path.join(font_dir, fname)
-                        font_paths.append(full_path)
+            for fname in os.listdir(d):
+                fl = fname.lower()
+                if fl.endswith('.ttf') and any(kw in fl for kw in cn_kw):
+                    found.append((fl, os.path.join(d, fname)))
         except (OSError, PermissionError):
             continue
-    
-    # 按优先级排序
-    priority_order = ['simhei', 'msyh', 'yahei', 'simsun', 'noto', 'cjk']
-    sorted_paths = []
-    for priority in priority_order:
-        for fp in font_paths:
-            if priority in os.path.basename(fp).lower():
-                sorted_paths.append(fp)
-                font_paths.remove(fp)
-                break
-    sorted_paths.extend(font_paths)
-    
-    # 设置字体
-    font_loaded = False
-    for fp in sorted_paths:
-        try:
-            # 添加到matplotlib字体管理器
-            fm.fontManager.addfont(fp)
-            font_prop = fm.FontProperties(fname=fp)
-            font_name = font_prop.get_name()
-            plt.rcParams['font.family'] = font_name
-            plt.rcParams['font.sans-serif'] = [font_name]
-            plt.rcParams['axes.unicode_minus'] = False
-            font_loaded = True
-            return fp
-        except Exception:
-            continue
-    
-    # 如果都没找到，尝试使用默认中文字体名
-    default_fonts = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Arial Unicode MS', 'DejaVu Sans']
-    for font_name in default_fonts:
-        try:
-            plt.rcParams['font.family'] = font_name
-            plt.rcParams['font.sans-serif'] = [font_name]
-            plt.rcParams['axes.unicode_minus'] = False
-            font_loaded = True
-            return font_name
-        except Exception:
-            continue
-    
-    if not font_loaded:
-        plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    if not found:
+        return None
+    for pref in pref_order:
+        for fl, fpath in found:
+            if pref in fl:
+                return fpath
+    return found[0][1]
+
+_CN_TTF = _scan_chinese_ttf()
+
+def _setup_matplotlib_font():
+    """设置matplotlib全局字体，使用TTF文件路径"""
+    if _CN_TTF and os.path.isfile(_CN_TTF):
+        # 清除现有字体缓存，添加新字体
+        fm.fontManager.addfont(_CN_TTF)
+        # 获取字体名称
+        prop = FontProperties(fname=_CN_TTF)
+        font_name = prop.get_name()
+        plt.rcParams['font.family'] = font_name
+        plt.rcParams['font.sans-serif'] = [font_name]
         plt.rcParams['axes.unicode_minus'] = False
-    
+        return font_name
+    # 备选方案：尝试常见中文字体名
+    fallback_fonts = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Arial Unicode MS', 'DejaVu Sans']
+    for font_name in fallback_fonts:
+        try:
+            plt.rcParams['font.family'] = font_name
+            plt.rcParams['font.sans-serif'] = [font_name]
+            plt.rcParams['axes.unicode_minus'] = False
+            return font_name
+        except:
+            continue
     return None
 
 # 初始化matplotlib中文字体
-_CN_FONT = _setup_matplotlib_chinese_font()
+_SETUP_FONT = _setup_matplotlib_font()
+
+def _fp(size=12):
+    """返回直接绑定TTF文件路径的FontProperties，彻底绕过字体名查找"""
+    if _CN_TTF and os.path.isfile(_CN_TTF):
+        return FontProperties(fname=_CN_TTF, size=size)
+    return FontProperties(size=size)
 
 # ================================================================
 # 常量
@@ -173,7 +166,7 @@ def safe_timedelta(dt):
     if pd.isna(dt):
         return 0
     try:
-        return (datetime.now() - pd.to_datetime(dt)).days
+        return (get_beijing_time() - pd.to_datetime(dt)).days
     except:
         return 0
 
@@ -427,7 +420,7 @@ class FunnelAnalyzer:
         steps['甄别S3｜排除不可控渠道类型'] = s3
         uc = safe_col(s3, '更新时间', pd.NaT)
         if uc.notna().any():
-            cutoff = datetime.now() - timedelta(days=120)
+            cutoff = get_beijing_time() - timedelta(days=120)
             try:
                 m4 = uc.notna() & (pd.to_datetime(uc, errors='coerce') >= cutoff)
             except:
@@ -515,7 +508,7 @@ class FunnelAnalyzer:
         }
 
 # ================================================================
-# 图表生成（使用已配置的matplotlib中文字体）
+# 图表生成（所有文字用fontproperties=_fp()绑定TTF路径）
 # ================================================================
 def generate_charts(analyzer, save_dir):
     os.makedirs(save_dir, exist_ok=True)
@@ -535,11 +528,11 @@ def generate_charts(analyzer, save_dir):
         bars = ax.barh(range(len(stages)), amounts, color=bar_colors, edgecolor='white', height=0.6)
         for b, c, a in zip(bars, counts, amounts):
             ax.text(b.get_width() + max(amounts) * 0.01, b.get_y() + b.get_height() / 2,
-                    f'{a:.1f}万({c}单)', va='center', fontsize=9)
+                    f'{a:.1f}万({c}单)', va='center', fontproperties=_fp(9))
         ax.set_yticks(range(len(stages)))
-        ax.set_yticklabels(stages, fontsize=10)
-        ax.set_xlabel('金额(万元)', fontsize=11)
-        ax.set_title('销售漏斗各阶段金额分布', fontsize=13, fontweight='bold')
+        ax.set_yticklabels(stages, fontproperties=_fp(10))
+        ax.set_xlabel('金额(万元)', fontproperties=_fp(11))
+        ax.set_title('销售漏斗各阶段金额分布', fontproperties=_fp(13), fontweight='bold')
         ax.invert_yaxis()
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
@@ -562,11 +555,11 @@ def generate_charts(analyzer, save_dir):
         wedges, texts, autotexts = ax.pie(list(rc.values()), labels=labels, autopct='%1.1f%%',
                explode=[0.05] * len(rc), startangle=90, pctdistance=0.85)
         for t in texts:
-            t.set_fontsize(8)
+            t.set_fontproperties(_fp(8))
         for t in autotexts:
-            t.set_fontsize(7)
+            t.set_fontproperties(_fp(7))
         ax.set_title(f'无效机会原因分类(共{len(analyzer.invalid_records)}条)',
-                     fontsize=13, fontweight='bold')
+                     fontproperties=_fp(13), fontweight='bold')
         plt.tight_layout()
         p = os.path.join(save_dir, 'chart_invalid_reasons.png')
         plt.savefig(p, dpi=150, bbox_inches='tight')
@@ -585,10 +578,10 @@ def generate_charts(analyzer, save_dir):
         ax.bar([i - bw / 2 for i in x], nom, bw, label='名义金额', color='#3498db', alpha=0.8)
         ax.bar([i + bw / 2 for i in x], wgt, bw, label='加权金额', color='#e74c3c', alpha=0.8)
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=45, ha='right', fontsize=12)
-        ax.set_ylabel('金额(万元)', fontsize=14)
-        ax.set_title('销售人员有效漏斗对比', fontsize=16, fontweight='bold')
-        ax.legend(fontsize=14)
+        ax.set_xticklabels(names, rotation=45, ha='right', fontproperties=_fp(12))
+        ax.set_ylabel('金额(万元)', fontproperties=_fp(14))
+        ax.set_title('销售人员有效漏斗对比', fontproperties=_fp(16), fontweight='bold')
+        ax.legend(prop=_fp(14))
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
@@ -609,13 +602,13 @@ def generate_charts(analyzer, save_dir):
         ax.barh([i + 0.2 for i in y], wgt, 0.4, label='加权金额', color='#27ae60', alpha=0.8)
         for i, s in enumerate(sc):
             ax.text(max(nom[i], wgt[i]) + max(nom.max(), wgt.max()) * 0.02, i,
-                    f'{s:.0f}分', va='center', fontsize=14, color='#e74c3c', fontweight='bold')
+                    f'{s:.0f}分', va='center', fontproperties=_fp(14), color='#e74c3c', fontweight='bold')
         ax.set_yticks(y)
-        ax.set_yticklabels(names, fontsize=12)
-        ax.set_xlabel('金额(万元)', fontsize=14)
-        ax.set_title('高价值机会Top20(含综合评分)', fontsize=16, fontweight='bold')
+        ax.set_yticklabels(names, fontproperties=_fp(12))
+        ax.set_xlabel('金额(万元)', fontproperties=_fp(14))
+        ax.set_title('高价值机会Top20(含综合评分)', fontproperties=_fp(16), fontweight='bold')
         ax.invert_yaxis()
-        ax.legend(fontsize=14)
+        ax.legend(prop=_fp(14))
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
@@ -631,14 +624,14 @@ def generate_charts(analyzer, save_dir):
     ax.plot(range(len(fn)), fc_vals, 'o-', color='#2c3e50', linewidth=2, markersize=8)
     for i, (n, c) in enumerate(zip(fn, fc_vals)):
         ax.annotate(str(c), (i, c), textcoords="offset points", xytext=(0, 12),
-                    ha='center', fontsize=14, fontweight='bold')
+                    ha='center', fontproperties=_fp(14), fontweight='bold')
     ax.set_xticks(range(len(fn)))
     ax.set_xticklabels(
         [n.split('｜')[-1] if '｜' in n else n for n in fn],
-        rotation=25, ha='right', fontsize=12
+        rotation=25, ha='right', fontproperties=_fp(12)
     )
-    ax.set_ylabel('机会数量', fontsize=14)
-    ax.set_title('有效业务机会甄别过程漏斗', fontsize=16, fontweight='bold')
+    ax.set_ylabel('机会数量', fontproperties=_fp(14))
+    ax.set_title('有效业务机会甄别过程漏斗', fontproperties=_fp(16), fontweight='bold')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     plt.tight_layout()
@@ -747,7 +740,8 @@ def generate_report(analyzer, chart_files, output_path):
     doc.add_paragraph('')
     dp = doc.add_paragraph()
     dp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = dp.add_run(f'生成时间：{datetime.now().strftime("%Y年%m月%d日 %H:%M")}')
+    beijing_now = get_beijing_time()
+    r = dp.add_run(f'生成时间：{beijing_now.strftime("%Y年%m月%d日 %H:%M:%S")} (北京时间)')
     set_run_font(r, font_name='宋体', size=Pt(11), color=RGBColor(149, 165, 166))
     diag = analyzer.read_diagnosis
     yf = diag.get('year_filter', {})
@@ -1186,7 +1180,7 @@ def main():
         log_lines = []
 
         def _log(msg):
-            ts = datetime.now().strftime('%H:%M:%S')
+            ts = get_beijing_time().strftime('%H:%M:%S')
             log_lines.append(f'[{ts}] {msg}')
             log_area.code('\n'.join(log_lines))
 
@@ -1246,12 +1240,14 @@ def main():
             if analyzer.missing_cols:
                 _log(f' ⚠️ 仍有缺失列: {", ".join(analyzer.missing_cols)}')
 
-            _log(f' 🖋️ 中文字体配置: {_CN_FONT}')
+            _log(f' 🖋️ 中文字体TTF: {_CN_TTF}')
             _log('📊 生成图表...')
             # 确保输出目录存在
             safe_output_dir = output_dir.strip()
             if not safe_output_dir:
                 safe_output_dir = os.getcwd()
+            # 移除路径末尾可能多余的反斜杠
+            safe_output_dir = safe_output_dir.rstrip('\\').rstrip('/')
             # 确保路径有效并创建目录
             if not os.path.exists(safe_output_dir):
                 try:
@@ -1265,7 +1261,7 @@ def main():
             _log(f' ✅ {len(charts)}张图表，保存于: {cd}')
 
             _log('📝 生成DOCX报告...')
-            ts = datetime.now().strftime('%Y%m%d_%H%M')
+            ts = get_beijing_time().strftime('%Y%m%d_%H%M%S')
             rn = f'销售漏斗分析报告_{ts}.docx'
             rp = os.path.join(safe_output_dir, rn)
             generate_report(analyzer, charts, rp)
