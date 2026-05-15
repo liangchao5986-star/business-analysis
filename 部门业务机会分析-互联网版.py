@@ -1,5 +1,5 @@
 """ 销售漏斗智能分析工具 v1.0 — Streamlit版 """
-import os, re, tempfile
+import os, re, tempfile, glob
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -18,11 +18,10 @@ import matplotlib.font_manager as fm
 from matplotlib.font_manager import FontProperties
 
 # ================================================================
-# 全局字体修复：删除缓存 + 用FontProperties直接绑定TTF文件路径
-# 彻底解决中文方格问题（不依赖rcParams字体名查找）
+# 彻底解决中文方格：直接扫描TTF文件路径，用fname绑定，不依赖字体名查找
 # ================================================================
-def _find_chinese_ttf():
-    """扫描系统字体目录，找到第一个可用的中文TTF文件并返回路径"""
+def _scan_chinese_ttf():
+    """扫描系统字体目录，返回可用的中文TTF文件绝对路径列表（按优先级排序）"""
     font_dirs = []
     if os.name == 'nt':
         windir = os.environ.get('WINDIR', r'C:\Windows')
@@ -34,65 +33,31 @@ def _find_chinese_ttf():
         font_dirs.extend(['/usr/share/fonts', '/usr/local/share/fonts',
                           os.path.expanduser('~/.fonts'),
                           os.path.expanduser('~/.local/share/fonts')])
-    cn_keywords = ['simhei', 'msyh', 'yahei', 'simsun', 'song', 'noto', 'cjk',
-                   'wenquanyi', 'heiti', 'pingfang', 'fang', 'kai', 'gothic', 'ming', 'droid']
-    preferred_order = ['simhei', 'msyh', 'yahei', 'simsun', 'noto', 'cjk',
-                       'wenquanyi', 'heiti', 'pingfang', 'fangsong', 'kaiti']
+    cn_kw = ['simhei', 'msyh', 'yahei', 'simsun', 'song', 'noto', 'cjk',
+             'wenquanyi', 'heiti', 'pingfang', 'fangsong', 'kaiti', 'gothic', 'ming', 'droid']
+    pref_order = ['simhei', 'msyh', 'yahei', 'simsun', 'noto', 'cjk', 'wenquanyi', 'heiti', 'pingfang']
     found = []
     for d in font_dirs:
         if not os.path.isdir(d):
             continue
         for fname in os.listdir(d):
             fl = fname.lower()
-            if fl.endswith('.ttf'):
-                if any(kw in fl for kw in cn_keywords):
-                    fpath = os.path.join(d, fname)
-                    found.append((fl, fpath))
-    if not found:
-        for d in font_dirs:
-            if not os.path.isdir(d):
-                continue
-            for fname in os.listdir(d):
-                fl = fname.lower()
-                if fl.endswith('.ttc'):
-                    if any(kw in fl for kw in cn_keywords):
-                        fpath = os.path.join(d, fname)
-                        found.append((fl, fpath))
+            if fl.endswith('.ttf') and any(kw in fl for kw in cn_kw):
+                found.append((fl, os.path.join(d, fname)))
     if not found:
         return None
-    for pref in preferred_order:
+    for pref in pref_order:
         for fl, fpath in found:
             if pref in fl:
                 return fpath
     return found[0][1]
 
-# 删除缓存强制重建
-import glob as _glob
-_cache_dir = matplotlib.get_cachedir()
-for _cf in _glob.glob(os.path.join(_cache_dir, 'fontlist-*.json')):
-    try:
-        os.remove(_cf)
-    except Exception:
-        pass
-
-# 找到中文TTF并注册
-_CN_TTF_PATH = _find_chinese_ttf()
-_CN_FONT_PROP = None
-if _CN_TTF_PATH and os.path.isfile(_CN_TTF_PATH):
-    try:
-        fm.fontManager.addfont(_CN_TTF_PATH)
-        _CN_FONT_PROP = FontProperties(fname=_CN_TTF_PATH)
-        _cn_name = _CN_FONT_PROP.get_name()
-        plt.rcParams['font.sans-serif'] = [_cn_name] + plt.rcParams.get('font.sans-serif', [])
-        plt.rcParams['font.family'] = 'sans-serif'
-    except Exception:
-        _CN_FONT_PROP = None
-plt.rcParams['axes.unicode_minus'] = False
+_CN_TTF = _scan_chinese_ttf()
 
 def _fp(size=12):
-    """返回绑定TTF文件的中文字体属性，确保每个图表都正确使用"""
-    if _CN_FONT_PROP:
-        return FontProperties(fname=_CN_TTF_PATH, size=size)
+    """返回直接绑定TTF文件路径的FontProperties，彻底绕过字体名查找"""
+    if _CN_TTF and os.path.isfile(_CN_TTF):
+        return FontProperties(fname=_CN_TTF, size=size)
     return FontProperties(size=size)
 
 # ================================================================
@@ -506,7 +471,7 @@ class FunnelAnalyzer:
         }
 
 # ================================================================
-# 图表生成（关键修改：所有文字均通过fontproperties=_fp()绑定TTF）
+# 图表生成（所有文字用fontproperties=_fp()绑定TTF路径）
 # ================================================================
 def generate_charts(analyzer, save_dir):
     os.makedirs(save_dir, exist_ok=True)
@@ -550,9 +515,12 @@ def generate_charts(analyzer, save_dir):
             val = str(INVALID_REASON_MAP.get(k, k))
             parts = val.split('：', 1)
             labels.append(parts[0] if parts else val)
-        ax.pie(list(rc.values()), labels=labels, autopct='%1.1f%%',
-               explode=[0.05] * len(rc), startangle=90, textprops={'fontproperties': _fp(8)},
-               pctdistance=0.85)
+        wedges, texts, autotexts = ax.pie(list(rc.values()), labels=labels, autopct='%1.1f%%',
+               explode=[0.05] * len(rc), startangle=90, pctdistance=0.85)
+        for t in texts:
+            t.set_fontproperties(_fp(8))
+        for t in autotexts:
+            t.set_fontproperties(_fp(7))
         ax.set_title(f'无效机会原因分类(共{len(analyzer.invalid_records)}条)',
                      fontproperties=_fp(13), fontweight='bold')
         plt.tight_layout()
@@ -1234,7 +1202,7 @@ def main():
             if analyzer.missing_cols:
                 _log(f' ⚠️ 仍有缺失列: {", ".join(analyzer.missing_cols)}')
 
-            _log(f' 🖋️ 中文字体: {_CN_TTF_PATH}')
+            _log(f' 🖋️ 中文字体TTF: {_CN_TTF}')
             _log('📊 生成图表...')
             cd = os.path.join(output_dir, 'charts')
             charts = generate_charts(analyzer, cd)
